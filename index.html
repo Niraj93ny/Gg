@@ -22,8 +22,8 @@
         .log-scroll::-webkit-scrollbar-track { background: #1E293B; border-radius: 10px; }
         .log-scroll::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
         .kiosk-card { background: rgba(30,41,59,0.9); backdrop-filter: blur(10px); border: 1px solid rgba(71,85,105,0.3); }
-        #video { transform: scaleX(-1); border-radius: 12px; background: #000; }
-        .reg-video { transform: scaleX(-1); border-radius: 12px; background: #000; width: 100%; max-width: 400px; }
+        #video { transform: scaleX(-1); border-radius: 12px; background: #000; width: 100%; max-width: 500px; height: auto; }
+        .reg-video { transform: scaleX(-1); border-radius: 12px; background: #000; width: 100%; max-width: 400px; height: auto; min-height: 200px; object-fit: cover; }
         .file-upload-area { border: 2px dashed #94A3B8; border-radius: 12px; padding: 20px; text-align: center; cursor: pointer; transition: border-color 0.2s; }
         .file-upload-area:hover { border-color: #818CF8; }
     </style>
@@ -54,7 +54,7 @@
             <div id="kiosk-main" class="kiosk-card rounded-2xl p-8 text-center">
                 <div id="clock" class="text-6xl font-bold text-white mb-2">--:--:--</div>
                 <div class="text-slate-400 text-lg mb-6">Face Scan or Manual Entry</div>
-                <video id="video" width="400" height="300" class="mx-auto rounded-xl border-2 border-slate-600 mb-4"></video>
+                <video id="video" width="400" height="300" class="mx-auto rounded-xl border-2 border-slate-600 mb-4" autoplay playsinline></video>
                 <div class="flex flex-wrap gap-4 justify-center">
                     <button id="btn-scan" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 px-8 rounded-xl transition text-lg flex items-center gap-2">
                         <i class="fas fa-camera"></i> Scan Face
@@ -173,7 +173,7 @@
                         </div>
                         <div class="mt-4">
                             <p class="text-sm text-slate-600 mb-1">Capture Face via Webcam</p>
-                            <video id="reg-video" class="reg-video border border-slate-300" autoplay></video>
+                            <video id="reg-video" class="reg-video border border-slate-300" autoplay playsinline muted></video>
                             <div class="flex flex-wrap gap-2 mt-2">
                                 <button id="btn-capture" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition text-sm flex items-center gap-2">
                                     <i class="fas fa-camera"></i> Capture
@@ -337,7 +337,7 @@ class FaceEngine {
         this.video = document.getElementById('video');
         this.stream = null;
         this.descriptors = {};
-        this.loadModels();
+        this.loadingPromise = this.loadModels();
         this.loadDescriptors();
         window.faceEngine = this;
     }
@@ -369,11 +369,20 @@ class FaceEngine {
         });
     }
 
-    async startCamera() {
+    async startCamera(videoElement = this.video) {
         try {
-            this.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-            this.video.srcObject = this.stream;
-            await this.video.play();
+            if (this.stream) {
+                this.stream.getTracks().forEach(t => t.stop());
+            }
+            this.stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    facingMode: 'user',
+                    width: { ideal: 640 },
+                    height: { ideal: 480 }
+                } 
+            });
+            videoElement.srcObject = this.stream;
+            await videoElement.play();
             return true;
         } catch (e) {
             console.error('Camera error:', e);
@@ -386,11 +395,18 @@ class FaceEngine {
             this.stream.getTracks().forEach(t => t.stop());
             this.stream = null;
         }
-        this.video.srcObject = null;
+        if (this.video) {
+            this.video.srcObject = null;
+        }
     }
 
     async detectFace(videoElement = this.video) {
-        if (!this.isLoaded || !videoElement || videoElement.paused) return null;
+        if (!this.isLoaded) {
+            await this.loadingPromise;
+        }
+        if (!videoElement || videoElement.paused || videoElement.readyState < 2) {
+            return null;
+        }
         try {
             const det = await faceapi.detectSingleFace(videoElement, new faceapi.TinyFaceDetectorOptions())
                 .withFaceLandmarks()
@@ -430,7 +446,7 @@ class Kiosk {
         this.currentStudent = null;
         this.timer = null;
         this.timerCount = 3;
-        // DOM refs...
+        // DOM refs
         this.main = document.getElementById('kiosk-main');
         this.action = document.getElementById('kiosk-action');
         this.success = document.getElementById('kiosk-success');
@@ -457,7 +473,17 @@ class Kiosk {
 
         setInterval(() => this.updateClock(), 1000);
         this.updateClock();
-        this.face.startCamera().then(ok => { if (!ok) this.status.textContent = '⚠️ Camera not available'; });
+        
+        // Start camera after a short delay to ensure DOM is ready
+        setTimeout(() => {
+            this.face.startCamera(this.video).then(ok => { 
+                if (!ok) {
+                    this.status.textContent = '⚠️ Camera not available';
+                    this.status.className = 'text-red-400 font-mono text-sm bg-slate-800/50 rounded-lg px-4 py-2 inline-block';
+                }
+            });
+        }, 500);
+        
         console.log('🖥️ Kiosk ready');
     }
 
@@ -530,7 +556,7 @@ class Kiosk {
     async startScan() {
         if (!this.face.isLoaded) {
             this.status.textContent = '⏳ Loading face models...';
-            await this.face.loadModels();
+            await this.face.loadingPromise;
         }
         this.status.textContent = '🔍 Scanning...';
         const descriptor = await this.face.detectFace();
@@ -676,39 +702,69 @@ const admin = {
 // =============================================================
 let regStream = null;
 let capturedDescriptor = null;
+let isRegCameraReady = false;
 
 async function startRegCamera() {
     try {
-        regStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+        if (regStream) {
+            regStream.getTracks().forEach(t => t.stop());
+        }
+        regStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+                facingMode: 'user',
+                width: { ideal: 640 },
+                height: { ideal: 480 }
+            } 
+        });
         const video = document.getElementById('reg-video');
         video.srcObject = regStream;
         await video.play();
+        isRegCameraReady = true;
         document.getElementById('reg-status').textContent = '📷 Camera ready. Click "Capture" to capture face.';
+        document.getElementById('reg-status').className = 'mt-2 text-sm text-emerald-600';
     } catch (e) {
+        console.error('Registration camera error:', e);
         document.getElementById('reg-status').textContent = '⚠️ Camera access denied. Use file upload instead.';
+        document.getElementById('reg-status').className = 'mt-2 text-sm text-red-500';
+        isRegCameraReady = false;
     }
 }
-startRegCamera();
+
+// Start registration camera
+setTimeout(startRegCamera, 500);
 
 document.getElementById('btn-capture').addEventListener('click', async () => {
     const video = document.getElementById('reg-video');
-    if (!video.srcObject) {
+    if (!isRegCameraReady || !video.srcObject) {
         document.getElementById('reg-status').textContent = '⚠️ Camera not available. Use file upload.';
+        document.getElementById('reg-status').className = 'mt-2 text-sm text-red-500';
         return;
     }
+    
+    // Make sure face engine is loaded
+    if (!window.faceEngine) {
+        document.getElementById('reg-status').textContent = '⏳ Face engine loading...';
+        return;
+    }
+    await window.faceEngine.loadingPromise;
+    
     const descriptor = await window.faceEngine.detectFace(video);
     if (!descriptor) {
         document.getElementById('reg-status').textContent = '❌ No face detected. Please ensure face is visible and well-lit.';
+        document.getElementById('reg-status').className = 'mt-2 text-sm text-red-500';
         return;
     }
     capturedDescriptor = Array.from(descriptor);
     document.getElementById('reg-status').textContent = '✅ Face captured! Now fill in name/room and click Register.';
+    document.getElementById('reg-status').className = 'mt-2 text-sm text-emerald-600';
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(video, 0, 0);
     document.getElementById('reg-preview-container').innerHTML = `<img src="${canvas.toDataURL()}" class="max-h-48 rounded-lg">`;
+    document.getElementById('reg-preview-status').textContent = 'Face captured!';
+    document.getElementById('reg-preview-status').className = 'mt-1 text-xs text-emerald-600';
 });
 
 document.getElementById('file-upload-area').addEventListener('click', () => {
@@ -717,18 +773,34 @@ document.getElementById('file-upload-area').addEventListener('click', () => {
 document.getElementById('reg-file').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    
+    if (!window.faceEngine) {
+        document.getElementById('reg-status').textContent = '⏳ Face engine loading...';
+        return;
+    }
+    await window.faceEngine.loadingPromise;
+    
     const img = new Image();
     img.onload = async () => {
-        const det = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
-            .withFaceLandmarks()
-            .withFaceDescriptor();
-        if (!det) {
-            document.getElementById('reg-status').textContent = '❌ No face found in the uploaded image.';
-            return;
+        try {
+            const det = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
+                .withFaceLandmarks()
+                .withFaceDescriptor();
+            if (!det) {
+                document.getElementById('reg-status').textContent = '❌ No face found in the uploaded image.';
+                document.getElementById('reg-status').className = 'mt-2 text-sm text-red-500';
+                return;
+            }
+            capturedDescriptor = Array.from(det.descriptor);
+            document.getElementById('reg-status').textContent = '✅ Face extracted from image! Now register.';
+            document.getElementById('reg-status').className = 'mt-2 text-sm text-emerald-600';
+            document.getElementById('reg-preview-container').innerHTML = `<img src="${URL.createObjectURL(file)}" class="max-h-48 rounded-lg">`;
+            document.getElementById('reg-preview-status').textContent = 'Face extracted!';
+            document.getElementById('reg-preview-status').className = 'mt-1 text-xs text-emerald-600';
+        } catch (err) {
+            document.getElementById('reg-status').textContent = '❌ Error processing image.';
+            document.getElementById('reg-status').className = 'mt-2 text-sm text-red-500';
         }
-        capturedDescriptor = Array.from(det.descriptor);
-        document.getElementById('reg-status').textContent = '✅ Face extracted from image! Now register.';
-        document.getElementById('reg-preview-container').innerHTML = `<img src="${URL.createObjectURL(file)}" class="max-h-48 rounded-lg">`;
     };
     img.src = URL.createObjectURL(file);
 });
@@ -750,8 +822,11 @@ document.getElementById('btn-register').addEventListener('click', () => {
         descriptor: capturedDescriptor
     });
     DB.setStudents(students);
-    window.faceEngine.descriptors[newId] = new Float32Array(capturedDescriptor);
+    if (window.faceEngine) {
+        window.faceEngine.descriptors[newId] = new Float32Array(capturedDescriptor);
+    }
     document.getElementById('reg-status').textContent = `✅ Student ${name} registered with ID ${newId}!`;
+    document.getElementById('reg-status').className = 'mt-2 text-sm text-emerald-600';
     document.getElementById('reg-name').value = '';
     document.getElementById('reg-room').value = '';
     capturedDescriptor = null;
@@ -759,6 +834,7 @@ document.getElementById('btn-register').addEventListener('click', () => {
     document.getElementById('reg-preview-name').textContent = name;
     document.getElementById('reg-preview-room').textContent = `Room: ${room}`;
     document.getElementById('reg-preview-status').textContent = 'Registered!';
+    document.getElementById('reg-preview-status').className = 'mt-1 text-xs text-emerald-600';
     admin.refreshAll();
 });
 
@@ -770,7 +846,9 @@ document.getElementById('btn-clear-reg').addEventListener('click', () => {
     document.getElementById('reg-preview-name').textContent = 'No student selected';
     document.getElementById('reg-preview-room').textContent = 'Room: --';
     document.getElementById('reg-preview-status').textContent = 'Awaiting capture';
+    document.getElementById('reg-preview-status').className = 'mt-1 text-xs text-slate-400';
     document.getElementById('reg-status').textContent = 'Form cleared.';
+    document.getElementById('reg-status').className = 'mt-2 text-sm text-slate-500';
 });
 
 // =============================================================
