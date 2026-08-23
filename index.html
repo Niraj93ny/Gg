@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dormitory Face Entry System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
+    <!-- face-api.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <style>
+        .kiosk-scan { background: #0F172A; min-height: 100vh; }
+        .scan-pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.4); } 70% { box-shadow: 0 0 0 20px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }
+        .success-flash { animation: flashGreen 0.5s ease-out; }
+        @keyframes flashGreen { 0% { background-color: rgba(34,197,94,0.3); } 100% { background-color: transparent; } }
+        .badge-in { background: #DCFCE7; color: #15803D; }
+        .badge-out { background: #FEE2E2; color: #B91C1C; }
+        .hidden { display: none !important; }
+        .log-scroll { max-height: 400px; overflow-y: auto; }
+        .log-scroll::-webkit-scrollbar { width: 6px; }
+        .log-scroll::-webkit-scrollbar-track { background: #1E293B; border-radius: 10px; }
+        .log-scroll::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
+        .kiosk-card { background: rgba(30,41,59,0.9); backdrop-filter: blur(10px); border: 1px solid rgba(71,85,105,0.3); }
+        #video { transform: scaleX(-1); border-radius: 12px; background: #000; }
+        .reg-video { transform: scaleX(-1); border-radius: 12px; background: #000; width: 100%; max-width: 400px; }
+        .file-upload-area { border: 2px dashed #94A3B8; border-radius: 12px; padding: 20px; text-align: center; cursor: pointer; transition: border-color 0.2s; }
+        .file-upload-area:hover { border-color: #818CF8; }
+    </style>
+</head>
+<body>
+
+<div id="app" class="min-h-screen bg-slate-900">
+    <!-- Top Bar -->
+    <div class="bg-slate-800 border-b border-slate-700 px-6 py-3 flex flex-wrap items-center justify-between">
+        <div class="flex items-center gap-4">
+            <i class="fas fa-building text-indigo-400 text-2xl"></i>
+            <span class="text-white font-bold text-xl">Dormitory Face Entry</span>
+        </div>
+        <div class="flex gap-2">
+            <button id="tab-kiosk" class="tab-btn active px-6 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition">
+                <i class="fas fa-desktop mr-2"></i> Kiosk
+            </button>
+            <button id="tab-admin" class="tab-btn px-6 py-2 rounded-lg text-sm font-medium bg-slate-700 text-slate-300 hover:bg-slate-600 transition">
+                <i class="fas fa-chart-pie mr-2"></i> Admin
+            </button>
+        </div>
+    </div>
+
+    <!-- ============ KIOSK VIEW ============ -->
+    <div id="kiosk-view" class="kiosk-scan flex items-center justify-center p-4">
+        <div class="w-full max-w-3xl">
+            <!-- Main Scan Screen -->
+            <div id="kiosk-main" class="kiosk-card rounded-2xl p-8 text-center">
+                <div id="clock" class="text-6xl font-bold text-white mb-2">--:--:--</div>
+                <div class="text-slate-400 text-lg mb-6">Face Scan or Manual Entry</div>
+                <video id="video" width="400" height="300" class="mx-auto rounded-xl border-2 border-slate-600 mb-4"></video>
+                <div class="flex flex-wrap gap-4 justify-center">
+                    <button id="btn-scan" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 px-8 rounded-xl transition text-lg flex items-center gap-2">
+                        <i class="fas fa-camera"></i> Scan Face
+                    </button>
+                    <button id="btn-manual" class="bg-slate-600 hover:bg-slate-700 text-white font-semibold py-3 px-8 rounded-xl transition text-lg flex items-center gap-2">
+                        <i class="fas fa-keyboard"></i> Manual Entry
+                    </button>
+                </div>
+                <div id="manual-form" class="hidden mt-6 text-left">
+                    <input id="manual-name" type="text" placeholder="Type student name..." class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500">
+                    <div class="mt-3">
+                        <label class="text-slate-400 block mb-1">Reason for Exit</label>
+                        <select id="manual-reason" class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500">
+                            <option value="">Select reason...</option>
+                            <option value="Home Visit">Home Visit</option>
+                            <option value="Class">Class</option>
+                            <option value="Emergency">Emergency</option>
+                            <option value="Meal">Meal</option>
+                            <option value="Gym">Gym</option>
+                            <option value="Other">Other</option>
+                        </select>
+                        <input id="manual-custom" type="text" placeholder="Custom reason..." class="mt-2 w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500 hidden">
+                    </div>
+                    <button id="btn-manual-submit" class="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition text-lg">
+                        <i class="fas fa-check mr-2"></i> Submit
+                    </button>
+                </div>
+                <div id="kiosk-status" class="mt-4 text-emerald-400 font-mono text-sm bg-slate-800/50 rounded-lg px-4 py-2 inline-block">
+                    <i class="fas fa-circle text-[6px] mr-2 align-middle"></i> Ready
+                </div>
+                <div id="last-scan-display" class="text-slate-500 text-xs mt-2"></div>
+            </div>
+
+            <!-- Action Screen -->
+            <div id="kiosk-action" class="hidden kiosk-card rounded-2xl p-8">
+                <div class="flex items-start gap-6">
+                    <div class="w-24 h-24 rounded-2xl bg-slate-700 flex items-center justify-center flex-shrink-0">
+                        <i class="fas fa-user-graduate text-5xl text-slate-400"></i>
+                    </div>
+                    <div class="flex-1 text-left">
+                        <h2 id="action-name" class="text-3xl font-bold text-white mb-1">Student</h2>
+                        <p id="action-room" class="text-slate-400 text-lg">Room: --</p>
+                        <div class="mt-3 flex items-center gap-4">
+                            <span id="action-status" class="badge-in px-4 py-1.5 rounded-full text-sm font-semibold">IN</span>
+                            <span id="action-id" class="text-slate-500 text-sm">ID: --</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-6">
+                    <label class="text-slate-400 text-sm block mb-2">Reason for Exit</label>
+                    <select id="action-reason" class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500">
+                        <option value="">Select reason...</option>
+                        <option value="Home Visit">Home Visit</option>
+                        <option value="Class">Class</option>
+                        <option value="Emergency">Emergency</option>
+                        <option value="Meal">Meal</option>
+                        <option value="Gym">Gym</option>
+                        <option value="Other">Other</option>
+                    </select>
+                    <input id="action-custom" type="text" placeholder="Custom reason..." class="mt-2 w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500 hidden">
+                </div>
+                <div class="mt-8 flex gap-4">
+                    <button id="action-confirm" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 rounded-xl transition text-lg">
+                        <i class="fas fa-check mr-2"></i> Confirm
+                    </button>
+                    <button id="action-cancel" class="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-semibold py-3 rounded-xl transition text-lg">
+                        <i class="fas fa-times mr-2"></i> Cancel
+                    </button>
+                </div>
+                <div id="action-timer" class="text-slate-500 text-sm text-center mt-4">Auto-confirming in <span id="timer-count">3</span>s</div>
+            </div>
+
+            <!-- Success Screen -->
+            <div id="kiosk-success" class="hidden kiosk-card rounded-2xl p-8 text-center success-flash">
+                <i class="fas fa-check-circle text-6xl text-emerald-400 mb-4"></i>
+                <h2 class="text-3xl font-bold text-white mb-2">Success!</h2>
+                <p id="success-message" class="text-slate-300 text-lg">Entry recorded</p>
+                <div class="mt-6 text-slate-500 text-sm">Returning to main screen...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ ADMIN VIEW ============ -->
+    <div id="admin-view" class="hidden min-h-screen bg-slate-100 p-6">
+        <div class="max-w-7xl mx-auto">
+            <!-- Metrics -->
+            <div class="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
+                <div class="bg-white rounded-xl shadow-sm p-5 border border-slate-200">
+                    <p class="text-sm text-slate-500">Total Residents</p>
+                    <p id="metric-total" class="text-3xl font-bold text-slate-800">0</p>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm p-5 border border-slate-200">
+                    <p class="text-sm text-slate-500">Currently Inside</p>
+                    <p id="metric-inside" class="text-3xl font-bold text-emerald-600">0</p>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm p-5 border border-slate-200">
+                    <p class="text-sm text-slate-500">Currently Outside</p>
+                    <p id="metric-outside" class="text-3xl font-bold text-amber-600">0</p>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm p-5 border border-slate-200">
+                    <p class="text-sm text-slate-500">Late Alerts</p>
+                    <p id="metric-late" class="text-3xl font-bold text-red-600">0</p>
+                </div>
+            </div>
+
+            <!-- Registration Panel -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+                <h3 class="font-semibold text-slate-700 mb-4 flex items-center gap-2">
+                    <i class="fas fa-user-plus text-indigo-400"></i> Register New Student
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <div class="grid grid-cols-1 gap-3">
+                            <input id="reg-name" type="text" placeholder="Full Name" class="border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-400">
+                            <input id="reg-room" type="text" placeholder="Room Number (e.g. A-101)" class="border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-400">
+                        </div>
+                        <div class="mt-4">
+                            <p class="text-sm text-slate-600 mb-1">Capture Face via Webcam</p>
+                            <video id="reg-video" class="reg-video border border-slate-300" autoplay></video>
+                            <div class="flex flex-wrap gap-2 mt-2">
+                                <button id="btn-capture" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition text-sm flex items-center gap-2">
+                                    <i class="fas fa-camera"></i> Capture
+                                </button>
+                                <button id="btn-register" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg transition text-sm flex items-center gap-2">
+                                    <i class="fas fa-save"></i> Register
+                                </button>
+                                <button id="btn-clear-reg" class="bg-slate-300 hover:bg-slate-400 text-slate-700 px-4 py-2 rounded-lg transition text-sm">
+                                    Clear
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <p class="text-sm text-slate-600 mb-1">Or upload a photo</p>
+                            <div class="file-upload-area" id="file-upload-area">
+                                <i class="fas fa-cloud-upload-alt text-2xl text-slate-400"></i>
+                                <p class="text-sm text-slate-500 mt-1">Click to select an image file</p>
+                                <input type="file" id="reg-file" accept="image/*" class="hidden">
+                            </div>
+                        </div>
+                        <div id="reg-status" class="mt-2 text-sm text-slate-500"></div>
+                    </div>
+                    <div class="bg-slate-50 rounded-xl p-4 flex flex-col items-center justify-center border border-slate-200">
+                        <div id="reg-preview-container" class="w-full max-h-48 flex items-center justify-center">
+                            <i class="fas fa-user-circle text-8xl text-slate-300"></i>
+                        </div>
+                        <p id="reg-preview-name" class="text-lg font-medium text-slate-700 mt-2">No student selected</p>
+                        <p id="reg-preview-room" class="text-sm text-slate-500">Room: --</p>
+                        <div id="reg-preview-status" class="mt-1 text-xs text-slate-400">Awaiting capture</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Real-Time Feed -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-6">
+                <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+                    <h3 class="font-semibold text-slate-700"><i class="fas fa-clock text-indigo-400 mr-2"></i> Live Feed</h3>
+                    <span id="feed-count" class="text-xs text-slate-400">0 events</span>
+                </div>
+                <div id="real-time-feed" class="log-scroll p-2 max-h-60">
+                    <div class="text-center text-slate-400 py-8 text-sm">No events yet.</div>
+                </div>
+            </div>
+
+            <!-- Resident Table -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div class="px-5 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                    <h3 class="font-semibold text-slate-700"><i class="fas fa-table text-indigo-400 mr-2"></i> Residents</h3>
+                    <div class="flex flex-wrap items-center gap-3">
+                        <input id="admin-search" type="text" placeholder="Search..." class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-400">
+                        <select id="admin-filter" class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-400">
+                            <option value="all">All</option>
+                            <option value="IN">IN</option>
+                            <option value="OUT">OUT</option>
+                        </select>
+                        <button id="export-csv" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-4 py-1.5 rounded-lg transition flex items-center gap-2">
+                            <i class="fas fa-download"></i> Export CSV
+                        </button>
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm">
+                        <thead class="bg-slate-50 text-slate-500 text-xs uppercase">
+                            <tr>
+                                <th class="px-5 py-3 text-left">ID</th>
+                                <th class="px-5 py-3 text-left">Name</th>
+                                <th class="px-5 py-3 text-left">Room</th>
+                                <th class="px-5 py-3 text-left">Status</th>
+                                <th class="px-5 py-3 text-left">Last</th>
+                                <th class="px-5 py-3 text-center">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// =============================================================
+// DATA LAYER (localStorage)
+// =============================================================
+const DB = {
+    getStudents() {
+        const data = localStorage.getItem('face_students');
+        return data ? JSON.parse(data) : [];
+    },
+    setStudents(students) {
+        localStorage.setItem('face_students', JSON.stringify(students));
+    },
+    getLogs() {
+        const data = localStorage.getItem('face_logs');
+        return data ? JSON.parse(data) : [];
+    },
+    setLogs(logs) {
+        localStorage.setItem('face_logs', JSON.stringify(logs));
+    },
+    getStudent(id) {
+        return this.getStudents().find(s => s.id === id);
+    },
+    addLog(residentId, action, reason = '') {
+        const logs = this.getLogs();
+        logs.push({
+            id: 'log_' + Date.now(),
+            residentId,
+            action,
+            timestamp: new Date().toISOString(),
+            reason
+        });
+        this.setLogs(logs);
+        return logs;
+    },
+    updateStatus(id, status, reason = '') {
+        const students = this.getStudents();
+        const student = students.find(s => s.id === id);
+        if (!student) return null;
+        student.status = status;
+        student.lastUpdated = new Date().toISOString();
+        this.setStudents(students);
+        this.addLog(id, status, reason);
+        return student;
+    },
+    deleteStudent(id) {
+        let students = this.getStudents();
+        students = students.filter(s => s.id !== id);
+        this.setStudents(students);
+        if (window.faceEngine) {
+            delete window.faceEngine.descriptors[id];
+        }
+        return students;
+    },
+    seed() {
+        if (this.getStudents().length === 0) {
+            const mock = [
+                { id: 'S1001', name: 'Emma Johnson', room: 'A-101', status: 'IN', lastUpdated: new Date().toISOString() },
+                { id: 'S1002', name: 'Liam Chen', room: 'B-204', status: 'OUT', lastUpdated: new Date().toISOString() },
+                { id: 'S1003', name: 'Sophia Martinez', room: 'C-312', status: 'IN', lastUpdated: new Date().toISOString() },
+                { id: 'S1004', name: 'Noah Williams', room: 'A-107', status: 'OUT', lastUpdated: new Date().toISOString() },
+                { id: 'S1005', name: 'Olivia Brown', room: 'B-215', status: 'IN', lastUpdated: new Date().toISOString() },
+                { id: 'S1006', name: 'James Davis', room: 'C-401', status: 'IN', lastUpdated: new Date().toISOString() },
+                { id: 'S1007', name: 'Mia Wilson', room: 'A-122', status: 'OUT', lastUpdated: new Date().toISOString() },
+                { id: 'S1008', name: 'Ethan Garcia', room: 'B-219', status: 'IN', lastUpdated: new Date().toISOString() }
+            ];
+            this.setStudents(mock);
+            this.setLogs([
+                { id: 'log1', residentId: 'S1001', action: 'IN', timestamp: new Date(Date.now()-3600000).toISOString(), reason: 'Returned' }
+            ]);
+        }
+    }
+};
+DB.seed();
+
+// =============================================================
+// FACE RECOGNITION ENGINE
+// =============================================================
+class FaceEngine {
+    constructor() {
+        this.isLoaded = false;
+        this.video = document.getElementById('video');
+        this.stream = null;
+        this.descriptors = {};
+        this.loadModels();
+        this.loadDescriptors();
+        window.faceEngine = this;
+    }
+
+    async loadModels() {
+        try {
+            const MODEL_URL = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights';
+            await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+            await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+            await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+            console.log('✅ Face models loaded');
+            this.isLoaded = true;
+        } catch (e) {
+            console.warn('⚠️ Failed to load face models, using fallback.', e);
+            this.isLoaded = true;
+        }
+    }
+
+    loadDescriptors() {
+        const students = DB.getStudents();
+        students.forEach(s => {
+            if (s.descriptor) {
+                this.descriptors[s.id] = new Float32Array(s.descriptor);
+            } else {
+                const mock = new Float32Array(128);
+                for (let i = 0; i < 128; i++) mock[i] = Math.random();
+                this.descriptors[s.id] = mock;
+            }
+        });
+    }
+
+    async startCamera() {
+        try {
+            this.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+            this.video.srcObject = this.stream;
+            await this.video.play();
+            return true;
+        } catch (e) {
+            console.error('Camera error:', e);
+            return false;
+        }
+    }
+
+    stopCamera() {
+        if (this.stream) {
+            this.stream.getTracks().forEach(t => t.stop());
+            this.stream = null;
+        }
+        this.video.srcObject = null;
+    }
+
+    async detectFace(videoElement = this.video) {
+        if (!this.isLoaded || !videoElement || videoElement.paused) return null;
+        try {
+            const det = await faceapi.detectSingleFace(videoElement, new faceapi.TinyFaceDetectorOptions())
+                .withFaceLandmarks()
+                .withFaceDescriptor();
+            return det ? det.descriptor : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    findMatch(descriptor) {
+        let bestId = null, bestDist = Infinity;
+        for (const [id, stored] of Object.entries(this.descriptors)) {
+            const dist = this.euclideanDistance(descriptor, stored);
+            if (dist < bestDist) { bestDist = dist; bestId = id; }
+        }
+        return bestDist < 0.6 ? bestId : null;
+    }
+
+    euclideanDistance(a, b) {
+        let sum = 0;
+        for (let i = 0; i < a.length; i++) sum += (a[i] - b[i]) ** 2;
+        return Math.sqrt(sum);
+    }
+
+    findByName(name) {
+        return DB.getStudents().find(s => s.name.toLowerCase().includes(name.toLowerCase()));
+    }
+}
+
+// =============================================================
+// KIOSK CONTROLLER
+// =============================================================
+class Kiosk {
+    constructor() {
+        this.face = new FaceEngine();
+        this.currentStudent = null;
+        this.timer = null;
+        this.timerCount = 3;
+        // DOM refs...
+        this.main = document.getElementById('kiosk-main');
+        this.action = document.getElementById('kiosk-action');
+        this.success = document.getElementById('kiosk-success');
+        this.clock = document.getElementById('clock');
+        this.status = document.getElementById('kiosk-status');
+        this.video = document.getElementById('video');
+        this.actionName = document.getElementById('action-name');
+        this.actionRoom = document.getElementById('action-room');
+        this.actionStatus = document.getElementById('action-status');
+        this.actionId = document.getElementById('action-id');
+        this.actionReason = document.getElementById('action-reason');
+        this.actionCustom = document.getElementById('action-custom');
+        this.timerDisplay = document.getElementById('timer-count');
+        this.successMsg = document.getElementById('success-message');
+
+        document.getElementById('btn-scan').addEventListener('click', () => this.startScan());
+        document.getElementById('btn-manual').addEventListener('click', () => this.showManualForm());
+        document.getElementById('btn-manual-submit').addEventListener('click', () => this.handleManualSubmit());
+        document.getElementById('action-confirm').addEventListener('click', () => this.confirmAction());
+        document.getElementById('action-cancel').addEventListener('click', () => this.cancelAction());
+        this.actionReason.addEventListener('change', (e) => {
+            this.actionCustom.classList.toggle('hidden', e.target.value !== 'Other');
+        });
+
+        setInterval(() => this.updateClock(), 1000);
+        this.updateClock();
+        this.face.startCamera().then(ok => { if (!ok) this.status.textContent = '⚠️ Camera not available'; });
+        console.log('🖥️ Kiosk ready');
+    }
+
+    updateClock() {
+        const now = new Date();
+        this.clock.textContent = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    showMain() {
+        this.main.classList.remove('hidden');
+        this.action.classList.add('hidden');
+        this.success.classList.add('hidden');
+        this.status.innerHTML = '<i class="fas fa-circle text-[6px] mr-2 align-middle"></i> Ready';
+        this.status.className = 'text-emerald-400 font-mono text-sm bg-slate-800/50 rounded-lg px-4 py-2 inline-block';
+        document.getElementById('manual-form').classList.add('hidden');
+    }
+
+    showAction(student) {
+        this.currentStudent = student;
+        this.main.classList.add('hidden');
+        this.action.classList.remove('hidden');
+        this.success.classList.add('hidden');
+        this.actionName.textContent = student.name;
+        this.actionRoom.textContent = `Room: ${student.room}`;
+        this.actionId.textContent = `ID: ${student.id}`;
+        const nextStatus = student.status === 'IN' ? 'OUT' : 'IN';
+        this.actionStatus.textContent = nextStatus;
+        this.actionStatus.className = `badge-${nextStatus.toLowerCase()} px-4 py-1.5 rounded-full text-sm font-semibold`;
+        this.actionReason.value = '';
+        this.actionCustom.value = '';
+        this.actionCustom.classList.add('hidden');
+        this.startTimer();
+    }
+
+    showSuccess(msg) {
+        this.action.classList.add('hidden');
+        this.success.classList.remove('hidden');
+        this.successMsg.textContent = msg;
+        setTimeout(() => this.showMain(), 2500);
+    }
+
+    startTimer() {
+        this.timerCount = 3;
+        this.timerDisplay.textContent = this.timerCount;
+        clearInterval(this.timer);
+        this.timer = setInterval(() => {
+            this.timerCount--;
+            this.timerDisplay.textContent = this.timerCount;
+            if (this.timerCount <= 0) { clearInterval(this.timer); this.confirmAction(); }
+        }, 1000);
+    }
+
+    cancelAction() { clearInterval(this.timer); this.showMain(); }
+
+    confirmAction() {
+        if (!this.currentStudent) return;
+        clearInterval(this.timer);
+        const student = this.currentStudent;
+        const nextStatus = student.status === 'IN' ? 'OUT' : 'IN';
+        let reason = this.actionReason.value;
+        if (reason === 'Other') reason = this.actionCustom.value || 'Other';
+        const updated = DB.updateStatus(student.id, nextStatus, reason);
+        if (updated) {
+            this.showSuccess(`${updated.name} checked ${nextStatus === 'IN' ? 'IN' : 'OUT'}`);
+            this.updateAdmin();
+        }
+        this.currentStudent = null;
+    }
+
+    async startScan() {
+        if (!this.face.isLoaded) {
+            this.status.textContent = '⏳ Loading face models...';
+            await this.face.loadModels();
+        }
+        this.status.textContent = '🔍 Scanning...';
+        const descriptor = await this.face.detectFace();
+        if (descriptor) {
+            const matchId = this.face.findMatch(descriptor);
+            if (matchId) {
+                const student = DB.getStudent(matchId);
+                if (student) {
+                    this.status.textContent = `✅ Found: ${student.name}`;
+                    this.showAction(student);
+                    return;
+                }
+            }
+        }
+        this.status.textContent = '❌ No face match. Please enter name manually.';
+        this.showManualForm();
+    }
+
+    showManualForm() {
+        document.getElementById('manual-form').classList.remove('hidden');
+        document.getElementById('manual-name').focus();
+        this.status.textContent = '⌨️ Enter name below';
+    }
+
+    handleManualSubmit() {
+        const name = document.getElementById('manual-name').value.trim();
+        if (!name) { this.status.textContent = '⚠️ Please enter a name'; return; }
+        const student = this.face.findByName(name);
+        if (!student) { this.status.textContent = '❌ Student not found.'; return; }
+        let reason = document.getElementById('manual-reason').value;
+        if (reason === 'Other') reason = document.getElementById('manual-custom').value || 'Other';
+        const nextStatus = student.status === 'IN' ? 'OUT' : 'IN';
+        const updated = DB.updateStatus(student.id, nextStatus, reason);
+        if (updated) {
+            this.showSuccess(`${updated.name} checked ${nextStatus === 'IN' ? 'IN' : 'OUT'}`);
+            this.updateAdmin();
+        }
+        document.getElementById('manual-name').value = '';
+        document.getElementById('manual-reason').value = '';
+        document.getElementById('manual-custom').value = '';
+        document.getElementById('manual-form').classList.add('hidden');
+    }
+
+    updateAdmin() {
+        if (!document.getElementById('admin-view').classList.contains('hidden')) {
+            admin.refreshAll();
+        }
+    }
+}
+
+// =============================================================
+// ADMIN CONTROLLER
+// =============================================================
+const admin = {
+    refreshAll() {
+        this.updateMetrics();
+        this.renderFeed();
+        this.renderTable(
+            document.getElementById('admin-search').value,
+            document.getElementById('admin-filter').value
+        );
+    },
+    updateMetrics() {
+        const students = DB.getStudents();
+        const total = students.length;
+        const inside = students.filter(s => s.status === 'IN').length;
+        const outside = students.filter(s => s.status === 'OUT').length;
+        const late = students.filter(s => s.status === 'OUT' && new Date(s.lastUpdated).getHours() >= 23).length;
+        document.getElementById('metric-total').textContent = total;
+        document.getElementById('metric-inside').textContent = inside;
+        document.getElementById('metric-outside').textContent = outside;
+        document.getElementById('metric-late').textContent = late;
+    },
+    renderFeed() {
+        const logs = DB.getLogs();
+        const feed = document.getElementById('real-time-feed');
+        if (!logs.length) { feed.innerHTML = '<div class="text-center text-slate-400 py-8 text-sm">No events yet.</div>'; return; }
+        const recent = logs.slice(-20).reverse();
+        feed.innerHTML = recent.map(log => {
+            const student = DB.getStudent(log.residentId);
+            const name = student ? student.name : 'Unknown';
+            const room = student ? student.room : '—';
+            return `
+                <div class="flex items-center gap-3 px-3 py-2 border-b border-slate-100 hover:bg-slate-50 rounded-lg">
+                    <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 text-sm font-medium">${name.charAt(0)}</div>
+                    <div class="flex-1">
+                        <div class="flex flex-wrap items-baseline gap-2">
+                            <span class="font-medium text-slate-700 text-sm">${name}</span>
+                            <span class="text-xs text-slate-400">${room}</span>
+                            <span class="text-[10px] font-medium ${log.action === 'IN' ? 'text-emerald-600 bg-emerald-50' : 'text-amber-600 bg-amber-50'} px-2 py-0.5 rounded-full">${log.action}</span>
+                            <span class="text-[11px] text-slate-400 ml-auto">${new Date(log.timestamp).toLocaleTimeString()}</span>
+                        </div>
+                        ${log.reason ? `<p class="text-xs text-slate-500 mt-0.5"><i class="far fa-sticky-note mr-1"></i>${log.reason}</p>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+        document.getElementById('feed-count').textContent = `${logs.length} events`;
+    },
+    renderTable(search = '', filter = 'all') {
+        const students = DB.getStudents();
+        let filtered = students.filter(s => {
+            const matchSearch = s.name.toLowerCase().includes(search.toLowerCase()) ||
+                               s.id.toLowerCase().includes(search.toLowerCase()) ||
+                               s.room.toLowerCase().includes(search.toLowerCase());
+            const matchFilter = filter === 'all' || s.status === filter;
+            return matchSearch && matchFilter;
+        });
+        const tbody = document.getElementById('admin-table-body');
+        if (!filtered.length) {
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center text-slate-400 py-8">No residents</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = filtered.map(s => `
+            <tr class="border-t border-slate-100">
+                <td class="px-5 py-3 text-slate-600 font-mono text-xs">${s.id}</td>
+                <td class="px-5 py-3 font-medium text-slate-700">${s.name}</td>
+                <td class="px-5 py-3 text-slate-600">${s.room}</td>
+                <td class="px-5 py-3"><span class="badge-${s.status.toLowerCase()} text-xs font-semibold px-3 py-1 rounded-full">${s.status}</span></td>
+                <td class="px-5 py-3 text-slate-400 text-xs">${new Date(s.lastUpdated).toLocaleString()}</td>
+                <td class="px-5 py-3 text-center">
+                    <button onclick="admin.deleteStudent('${s.id}')" class="text-red-500 hover:text-red-700 transition text-sm">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    },
+    deleteStudent(id) {
+        if (!confirm('Delete this student?')) return;
+        DB.deleteStudent(id);
+        this.refreshAll();
+        document.getElementById('reg-preview-name').textContent = 'No student selected';
+        document.getElementById('reg-preview-room').textContent = 'Room: --';
+        document.getElementById('reg-preview-status').textContent = 'Awaiting capture';
+        document.getElementById('reg-preview-container').innerHTML = '<i class="fas fa-user-circle text-8xl text-slate-300"></i>';
+        alert('Student deleted.');
+    }
+};
+
+// =============================================================
+// REGISTRATION CONTROLS
+// =============================================================
+let regStream = null;
+let capturedDescriptor = null;
+
+async function startRegCamera() {
+    try {
+        regStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+        const video = document.getElementById('reg-video');
+        video.srcObject = regStream;
+        await video.play();
+        document.getElementById('reg-status').textContent = '📷 Camera ready. Click "Capture" to capture face.';
+    } catch (e) {
+        document.getElementById('reg-status').textContent = '⚠️ Camera access denied. Use file upload instead.';
+    }
+}
+startRegCamera();
+
+document.getElementById('btn-capture').addEventListener('click', async () => {
+    const video = document.getElementById('reg-video');
+    if (!video.srcObject) {
+        document.getElementById('reg-status').textContent = '⚠️ Camera not available. Use file upload.';
+        return;
+    }
+    const descriptor = await window.faceEngine.detectFace(video);
+    if (!descriptor) {
+        document.getElementById('reg-status').textContent = '❌ No face detected. Please ensure face is visible and well-lit.';
+        return;
+    }
+    capturedDescriptor = Array.from(descriptor);
+    document.getElementById('reg-status').textContent = '✅ Face captured! Now fill in name/room and click Register.';
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0);
+    document.getElementById('reg-preview-container').innerHTML = `<img src="${canvas.toDataURL()}" class="max-h-48 rounded-lg">`;
+});
+
+document.getElementById('file-upload-area').addEventListener('click', () => {
+    document.getElementById('reg-file').click();
+});
+document.getElementById('reg-file').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const img = new Image();
+    img.onload = async () => {
+        const det = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
+            .withFaceLandmarks()
+            .withFaceDescriptor();
+        if (!det) {
+            document.getElementById('reg-status').textContent = '❌ No face found in the uploaded image.';
+            return;
+        }
+        capturedDescriptor = Array.from(det.descriptor);
+        document.getElementById('reg-status').textContent = '✅ Face extracted from image! Now register.';
+        document.getElementById('reg-preview-container').innerHTML = `<img src="${URL.createObjectURL(file)}" class="max-h-48 rounded-lg">`;
+    };
+    img.src = URL.createObjectURL(file);
+});
+
+document.getElementById('btn-register').addEventListener('click', () => {
+    const name = document.getElementById('reg-name').value.trim();
+    const room = document.getElementById('reg-room').value.trim();
+    if (!name || !room) { alert('Please enter name and room number.'); return; }
+    if (!capturedDescriptor) { alert('Please capture or upload a face first.'); return; }
+    const students = DB.getStudents();
+    const maxId = students.reduce((max, s) => Math.max(max, parseInt(s.id.replace('S',''))), 1000);
+    const newId = 'S' + (maxId + 1);
+    students.push({
+        id: newId,
+        name,
+        room,
+        status: 'IN',
+        lastUpdated: new Date().toISOString(),
+        descriptor: capturedDescriptor
+    });
+    DB.setStudents(students);
+    window.faceEngine.descriptors[newId] = new Float32Array(capturedDescriptor);
+    document.getElementById('reg-status').textContent = `✅ Student ${name} registered with ID ${newId}!`;
+    document.getElementById('reg-name').value = '';
+    document.getElementById('reg-room').value = '';
+    capturedDescriptor = null;
+    document.getElementById('reg-preview-container').innerHTML = '<i class="fas fa-user-circle text-8xl text-slate-300"></i>';
+    document.getElementById('reg-preview-name').textContent = name;
+    document.getElementById('reg-preview-room').textContent = `Room: ${room}`;
+    document.getElementById('reg-preview-status').textContent = 'Registered!';
+    admin.refreshAll();
+});
+
+document.getElementById('btn-clear-reg').addEventListener('click', () => {
+    document.getElementById('reg-name').value = '';
+    document.getElementById('reg-room').value = '';
+    capturedDescriptor = null;
+    document.getElementById('reg-preview-container').innerHTML = '<i class="fas fa-user-circle text-8xl text-slate-300"></i>';
+    document.getElementById('reg-preview-name').textContent = 'No student selected';
+    document.getElementById('reg-preview-room').textContent = 'Room: --';
+    document.getElementById('reg-preview-status').textContent = 'Awaiting capture';
+    document.getElementById('reg-status').textContent = 'Form cleared.';
+});
+
+// =============================================================
+// TAB SWITCHING
+// =============================================================
+document.getElementById('tab-kiosk').addEventListener('click', function() {
+    document.getElementById('kiosk-view').classList.remove('hidden');
+    document.getElementById('admin-view').classList.add('hidden');
+    document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.remove('bg-indigo-600', 'text-white', 'bg-slate-700', 'text-slate-300');
+        b.classList.add('bg-slate-700', 'text-slate-300');
+    });
+    this.classList.remove('bg-slate-700', 'text-slate-300');
+    this.classList.add('bg-indigo-600', 'text-white');
+});
+
+document.getElementById('tab-admin').addEventListener('click', function() {
+    document.getElementById('kiosk-view').classList.add('hidden');
+    document.getElementById('admin-view').classList.remove('hidden');
+    document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.remove('bg-indigo-600', 'text-white', 'bg-slate-700', 'text-slate-300');
+        b.classList.add('bg-slate-700', 'text-slate-300');
+    });
+    this.classList.remove('bg-slate-700', 'text-slate-300');
+    this.classList.add('bg-indigo-600', 'text-white');
+    admin.refreshAll();
+});
+
+document.getElementById('admin-search').addEventListener('input', function() {
+    admin.renderTable(this.value, document.getElementById('admin-filter').value);
+});
+document.getElementById('admin-filter').addEventListener('change', function() {
+    admin.renderTable(document.getElementById('admin-search').value, this.value);
+});
+
+document.getElementById('export-csv').addEventListener('click', function() {
+    const students = DB.getStudents();
+    if (!students.length) { alert('No data'); return; }
+    let csv = 'ID,Name,Room,Status,LastUpdated\n';
+    students.forEach(s => {
+        csv += `${s.id},${s.name},${s.room},${s.status},${new Date(s.lastUpdated).toLocaleString()}\n`;
+    });
+    csv += '\n\nLogs\n';
+    csv += 'ResidentID,Action,Timestamp,Reason\n';
+    DB.getLogs().forEach(l => {
+        csv += `${l.residentId},${l.action},${new Date(l.timestamp).toLocaleString()},${l.reason || ''}\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `dormitory_logs_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+});
+
+// =============================================================
+// INIT
+// =============================================================
+const kiosk = new Kiosk();
+admin.refreshAll();
+console.log('✅ System ready – Dormitory Face Entry System');
+console.log('📌 Register students in Admin → Capture face → Scan in Kiosk.');
+</script>
+</body>
+</html>
